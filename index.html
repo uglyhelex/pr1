@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-touch-fullscreen" content="yes" />
+    <title>AR Viewer</title>
+
+    <!-- Оптимизированные версии библиотек -->
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
+
+    <!-- Предзагрузка ресурсов -->
+    <link rel="preload" href="models/cat.glb" as="fetch" crossorigin>
+    <link rel="preload" href="models/model.glb" as="fetch" crossorigin>
+    <link rel="preload" href="L.png" as="image">
+    <link rel="preload" href="R.png" as="image">
+    <link rel="preload" href="site.png" as="image">
+    <link rel="preload" href="em.png" as="image">
+
+    <!-- Отключение диалогов AR.js -->
+    <script>
+      window.addEventListener("load", function () {
+        if (window.ARjs && window.ARjs.Utils) {
+          window.ARjs.Utils.displayResolutionPrompt = function () {};
+        }
+        window.confirm = function (message) {
+          console.log("Пропущено окно подтверждения:", message);
+          return true;
+        };
+        window.prompt = function (message, defaultValue) {
+          console.log("Пропущено окно ввода:", message);
+          return defaultValue;
+        };
+      });
+    </script>
+
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        height: 100vh;
+        overflow: hidden;
+        touch-action: none;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      #loading-screen {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.9);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        color: #fff;
+        backdrop-filter: blur(5px);
+      }
+      #loading-screen.hidden { 
+        display: none;
+        pointer-events: none;
+      }
+      #loading-text { 
+        margin-top: 20px; 
+        font-size: 18px;
+        text-align: center;
+        padding: 0 20px;
+      }
+      #marker-status {
+        position: fixed;
+        top: 20px; 
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0,0,0,0.8);
+        padding: 12px 24px;
+        border-radius: 25px;
+        font-size: 16px;
+        z-index: 1000;
+        display: none;
+        backdrop-filter: blur(5px);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      }
+      .model-nav-buttons {
+        position: fixed;
+        bottom: 30px; 
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex; 
+        gap: 40px;
+        z-index: 1000;
+      }
+      .nav-button {
+        width: 70px; 
+        height: 70px;
+        cursor: pointer;
+        transition: transform .2s, opacity .2s;
+        opacity: 0.9;
+        filter: drop-shadow(0 4px 6px rgba(0,0,0,0.2));
+      }
+      .nav-button:hover { 
+        transform: scale(1.1);
+        opacity: 1;
+      }
+      .nav-button:active { 
+        transform: scale(0.95);
+      }
+      .a-enter-vr { 
+        display: none !important; 
+      }
+      .button {
+        position: absolute;
+        background: rgba(255,255,255,0.2);
+        color: #fff;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: background 0.3s;
+        z-index: 1000;
+        width: 80px; 
+        height: 32px;
+      }
+      @media (max-width: 768px) {
+        .nav-button {
+          width: 60px;
+          height: 60px;
+        }
+        .model-nav-buttons {
+          gap: 30px;
+          bottom: 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading-screen">
+      <div class="spinner"></div>
+      <div id="loading-text">Загрузка модели...</div>
+    </div>
+    <div id="marker-status">Наведите камеру на маркер Hiro</div>
+
+    <div class="model-nav-buttons">
+      <img id="btn-left" src="L.png" class="nav-button" alt="Предыдущая модель" />
+      <img id="btn-right" src="R.png" class="nav-button" alt="Следующая модель" />
+    </div>
+
+    <a-scene
+      embedded
+      arjs="sourceType: webcam; 
+            debugUIEnabled: false; 
+            detectionMode: mono; 
+            trackingMethod: best; 
+            maxDetectionRate: 60; 
+            canvasWidth: 1280; 
+            canvasHeight: 720; 
+            displayWidth: 1280; 
+            displayHeight: 720; 
+            patternRatio: 0.5; 
+            minConfidence: 0.3;
+            sourceWidth: 1280;
+            sourceHeight: 720;
+            maxDetectionRate: 60;
+            detectionMode: mono_and_matrix;"
+      renderer="logarithmicDepthBuffer: true; 
+                precision: high; 
+                antialias: true;
+                alpha: true;
+                sortObjects: true;
+                physicallyCorrectLights: true;"
+      vr-mode-ui="enabled: false"
+    >
+      <a-assets>
+        <a-mixin
+          id="spin"
+          animation="property: rotation; to: 0 360 0; loop: true; dur: 10000; easing: linear"
+        ></a-mixin>
+      </a-assets>
+
+      <a-marker
+        id="hiro-marker"
+        type="pattern"
+        preset="hiro"
+        smooth="true"
+        smoothCount="25"
+        smoothTolerance="0.003"
+        smoothThreshold="8"
+        minConfidence="0.3"
+        raycaster="objects: .clickable"
+        emitevents="true"
+      >
+        <a-entity id="model-wrapper" position="0 0 0">
+          <a-entity id="model-container" rotation="0 0 0" scale="1 1 1"></a-entity>
+        </a-entity>
+
+        <a-entity position="0 0 0">
+          <a-plane
+            id="website-button"
+            position="1.2 0 0"
+            width="0.5"
+            height="0.5"
+            material="src: site.png; transparent: true;"
+            look-at="[camera]"
+            class="clickable"
+            animation__click="property: scale; from: 1 1 1; to: 0.9 0.9 0.9; dur:100; easing: easeInOutQuad; startEvents: click"
+            animation__clickback="property: scale; from:0.9 0.9 0.9; to:1 1 1; dur:100; easing:easeInOutQuad; startEvents:animationcomplete__click"
+          ></a-plane>
+          <a-plane
+            id="email-button"
+            position="-1.2 0 0"
+            width="0.5"
+            height="0.5"
+            material="src: em.png; transparent: true;"
+            look-at="[camera]"
+            class="clickable"
+            animation__click="property: scale; from:1 1 1; to:0.9 0.9 0.9; dur:100; easing:easeInOutQuad; startEvents:click"
+            animation__clickback="property: scale; from:0.9 0.9 0.9; to:1 1 1; dur:100; easing:easeInOutQuad; startEvents:animationcomplete__click"
+          ></a-plane>
+        </a-entity>
+      </a-marker>
+
+      <a-entity
+        camera
+        cursor="rayOrigin: mouse; fuse: false"
+        raycaster="objects: .clickable"
+      >
+        <a-cursor></a-cursor>
+      </a-entity>
+    </a-scene>
+
+    <script>
+      // Оптимизированный обработчик кликов
+      AFRAME.registerComponent("clickable", {
+        init: function () {
+          const el = this.el;
+          const onTap = () => {
+            if (el.id === "website-button") {
+              window.open("https://www.alphawood.store", "_blank");
+            } else if (el.id === "email-button") {
+              window.location.href = "mailto:info@alphawood.store";
+            }
+          };
+          el.addEventListener("click", onTap);
+          el.addEventListener("touchstart", onTap);
+        },
+      });
+
+      // Улучшенная стабилизация позиции
+      AFRAME.registerComponent("model-stabilizer", {
+        init: function () {
+          this.lastPosition = new THREE.Vector3();
+          this.lastRotation = new THREE.Euler();
+          this.smoothFactor = 0.12;
+          this.rotationSmoothFactor = 0.08;
+          this.velocity = new THREE.Vector3();
+          this.angularVelocity = new THREE.Euler();
+          this.maxVelocity = 0.1;
+          this.maxAngularVelocity = 0.05;
+        },
+        tick: function () {
+          const pos = this.el.object3D.position;
+          const rot = this.el.object3D.rotation;
+          
+          // Ограничение скорости движения
+          this.velocity.subVectors(pos, this.lastPosition);
+          this.velocity.multiplyScalar(this.smoothFactor);
+          this.velocity.clampLength(0, this.maxVelocity);
+          
+          // Ограничение скорости вращения
+          this.angularVelocity.x = (rot.x - this.lastRotation.x) * this.rotationSmoothFactor;
+          this.angularVelocity.y = (rot.y - this.lastRotation.y) * this.rotationSmoothFactor;
+          this.angularVelocity.z = (rot.z - this.lastRotation.z) * this.rotationSmoothFactor;
+          
+          // Применение ограниченных изменений
+          pos.copy(this.lastPosition).add(this.velocity);
+          rot.x = this.lastRotation.x + Math.min(Math.max(this.angularVelocity.x, -this.maxAngularVelocity), this.maxAngularVelocity);
+          rot.y = this.lastRotation.y + Math.min(Math.max(this.angularVelocity.y, -this.maxAngularVelocity), this.maxAngularVelocity);
+          rot.z = this.lastRotation.z + Math.min(Math.max(this.angularVelocity.z, -this.maxAngularVelocity), this.maxAngularVelocity);
+          
+          this.lastPosition.copy(pos);
+          this.lastRotation.copy(rot);
+        }
+      });
+
+      // Улучшенное отслеживание ориентации
+      AFRAME.registerComponent("model-orientation", {
+        init: function() {
+          this.lastQuaternion = new THREE.Quaternion();
+          this.smoothFactor = 0.08;
+          this.maxRotationSpeed = 0.05;
+        },
+        tick: function () {
+          const marker = document.querySelector("#hiro-marker");
+          if (marker && marker.object3D) {
+            const targetQuaternion = marker.object3D.quaternion;
+            const currentQuaternion = this.el.object3D.quaternion;
+            
+            // Плавное вращение с ограничением скорости
+            currentQuaternion.slerp(targetQuaternion, this.smoothFactor);
+            
+            // Ограничение максимальной скорости вращения
+            const angle = currentQuaternion.angleTo(targetQuaternion);
+            if (angle > this.maxRotationSpeed) {
+              const t = this.maxRotationSpeed / angle;
+              currentQuaternion.slerp(targetQuaternion, t);
+            }
+          }
+        }
+      });
+
+      // Оптимизированный список моделей
+      const models = [
+        { glb: "models/cat.glb", scale: "3 3 3", position: "0 0 0", rotation: "0 0 0" },
+        { glb: "models/model.glb", scale: "3 3 3", position: "0 0 0", rotation: "0 0 0" },
+      ];
+      
+      let currentIndex = 0;
+      let currentModel = null;
+      const modelContainer = document.querySelector("#model-container");
+      const loadingScreen = document.getElementById("loading-screen");
+      const loadingText = document.getElementById("loading-text");
+      const markerStatus = document.getElementById("marker-status");
+
+      // Оптимизированная функция загрузки
+      function showLoading(msg = "Загрузка модели...") {
+        loadingText.textContent = msg;
+        loadingScreen.classList.remove("hidden");
+      }
+
+      function hideLoading() {
+        loadingScreen.classList.add("hidden");
+      }
+
+      // Оптимизированная функция переключения моделей
+      function switchModel(path, initial) {
+        if (initial) showLoading();
+        if (currentModel) {
+          currentModel.remove();
+          currentModel = null;
+        }
+        
+        const cfg = models.find((m) => m.glb === path) || {};
+        currentModel = document.createElement("a-entity");
+        
+        // Установка атрибутов модели
+        currentModel.setAttribute("gltf-model", path);
+        currentModel.setAttribute("scale", cfg.scale || "1.5 1.5 1.5");
+        currentModel.setAttribute("position", cfg.position || "0 0 0");
+        currentModel.setAttribute("rotation", cfg.rotation || "0 0 0");
+        currentModel.setAttribute("model-orientation", "");
+        currentModel.setAttribute("model-stabilizer", "");
+        
+        // Добавление обработчиков событий
+        currentModel.addEventListener("model-loaded", () => {
+          if (initial) hideLoading();
+        });
+        
+        currentModel.addEventListener("model-error", () => {
+          if (initial) {
+            loadingText.textContent = "Ошибка загрузки модели";
+            setTimeout(hideLoading, 3000);
+          }
+        });
+        
+        modelContainer.appendChild(currentModel);
+      }
+
+      // Оптимизированная функция переключения индекса
+      function switchToIndex(i) {
+        currentIndex = (i + models.length) % models.length;
+        switchModel(models[currentIndex].glb, false);
+        const vis = document.querySelector("#hiro-marker").object3D.visible;
+        markerStatus.style.display = vis ? "none" : "block";
+      }
+
+      // Обработчики событий
+      document.getElementById("btn-left").addEventListener("click", () => switchToIndex(currentIndex - 1));
+      document.getElementById("btn-right").addEventListener("click", () => switchToIndex(currentIndex + 1));
+
+      // Инициализация при загрузке
+      document.addEventListener("DOMContentLoaded", async () => {
+        try {
+          if ("xr" in navigator && !(await navigator.xr.isSessionSupported("immersive-ar"))) return;
+          switchModel(models[0].glb, true);
+        } catch (e) { 
+          console.error("Ошибка инициализации:", e);
+          loadingText.textContent = "Ошибка инициализации AR";
+          setTimeout(hideLoading, 3000);
+        }
+      });
+
+      // Обработка маркера
+      const markerEl = document.querySelector("#hiro-marker");
+      markerEl.addEventListener("markerFound", () => {
+        markerStatus.style.display = "none";
+        if (currentModel) {
+          currentModel.setAttribute("visible", true);
+        }
+      });
+      
+      markerEl.addEventListener("markerLost", () => {
+        markerStatus.style.display = "block";
+        if (currentModel) {
+          currentModel.setAttribute("visible", false);
+        }
+      });
+    </script>
+  </body>
+</html>
